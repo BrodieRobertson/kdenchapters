@@ -4,27 +4,77 @@ import json
 import time
 import sys
 
-guides = "kdenlive:docproperties.guides"
 framerate = 30
 
-def find_mainbin(root):
+def parse_timestamp(frame):
+    return time.strftime('%-M:%S', time.gmtime(frame/framerate))
+
+def kdenlive(root):
+    # Find main playlist block
+    main_bin = None
     for child in root:
         if "id" in child.attrib and child.attrib["id"] == "main_bin":
-            return child
+            main_bin = child
+            break
 
-def find_guides(root):
-    for child in root:
-        if "name" in child.attrib and child.attrib["name"] == guides:
-            return child.text
+    # Search for guides
+    guides = None
+    for child in main_bin:
+        if "name" in child.attrib and child.attrib["name"] == "kdenlive:docproperties.guides":
+            guides = json.loads(child.text)
+            break
 
-def parse_guides(guides):
+    if not guides:
+        return 0
+
+    # Parse guides into correct formate
     for guide in guides:
-        print(time.strftime('%-M:%S', time.gmtime(guide["pos"]/framerate)), guide["comment"])
+        print(parse_timestamp(guide["pos"]), guide["comment"])
 
-if len(sys.argv) == 2:
-    tree = ET.parse(sys.argv[1])
-    main_bin = find_mainbin(tree.getroot())
-    guides = json.loads(find_guides(main_bin))
-    parse_guides(guides)
+def olive(root):
+    # Find the sequences
+    sequences = None
+    for child in root:
+        if child.tag == "sequences":
+            sequences = child
+            break
+
+    # Parse markers in each sequence
+    for sequence in sequences:
+        print(sequence.attrib["name"])
+        for element in sequence:
+            if element.tag == "marker":
+                timestamp = parse_timestamp(int(element.attrib["frame"]))
+                print(timestamp, element.attrib["name"])
+
+if len(sys.argv) > 1:
+    tree = None
+    try:
+        tree = ET.parse(sys.argv[1])
+    except FileNotFoundError:
+        sys.exit('"' + sys.argv[1] + '" does not exist')
+    except ET.ParseError:
+        sys.exit('"' + sys.argv[1] + '" is not an XML file')
+
+    if len(sys.argv) > 2:
+        try:
+            framerate = int(sys.argv[2])
+        except ValueError:
+            sys.exit("Invalid framerate")
+    root = tree.getroot()
+
+    file_split = sys.argv[1].split(".")
+    if len(file_split) == 2:
+        switcher = {
+            "kdenlive": kdenlive,
+            "ove": olive
+        }
+
+        try:
+            func = switcher[file_split[1]](root)
+        except KeyError:
+            sys.exit('"' + sys.argv[1] + '" is an invalid file type')
+    else:
+        sys.exit('"' + sys.argv[1] + '" is unknown file type')
 else:
-    print("No File")
+    sys.exit("No file to parse")
